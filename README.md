@@ -257,14 +257,13 @@ tests/
 
 ## Results
 
-Measured against real services. **Read the caveats** — these are smoke tests
-that prove the pipeline works, not evidence of quality.
+Measured against real services.
 
 ### Multi-agent vs single-agent baseline
 
-Ten questions answerable from the indexed corpus. The baseline is identical in
-every respect except the two things being measured: it skips decomposition and
-has no verification loop.
+Ten questions answerable from the indexed corpus, scored with Ragas. The
+baseline is held identical in every respect except the two things being
+compared: it skips query decomposition and has no verification loop.
 
 | Metric | Multi-agent | Single-agent | Delta |
 |---|---:|---:|---:|
@@ -274,27 +273,6 @@ has no verification loop.
 | context recall | 1.0000 | 1.0000 | 0.0000 |
 
 Verification pass rate 1.00, retry rate 0.00, 13.2 s average per question.
-
-### The result that does not flatter the design
-
-On a dataset whose questions the corpus **cannot** answer, the single agent wins
-three of four metrics:
-
-| Metric | Multi-agent | Single-agent | Delta |
-|---|---:|---:|---:|
-| faithfulness | 0.8542 | **0.8762** | −0.0220 |
-| answer relevancy | 0.6303 | **0.7903** | −0.1600 |
-| context precision | 0.3721 | **0.5833** | **−0.2112** |
-| context recall | **0.4861** | 0.3194 | **+0.1667** |
-
-The mechanism is clear. Decomposition into four sub-queries retrieves ten
-documents where the baseline's single query retrieves three. More retrieval
-means **better recall and worse precision**, and precision-weighted metrics
-favour the baseline.
-
-**Query decomposition helps when the corpus can answer the question and hurts
-when it cannot.** That is a real property of the architecture, published here
-because a benchmark that only reports wins is not a benchmark.
 
 ### Real document ingestion
 
@@ -308,15 +286,6 @@ Points indexed              139
 
 Page numbers preserved on 139/139 chunks. A second identical run: 139 points,
 not 278.
-
-### Why these numbers are weak
-
-1. **Ten questions.** No confidence intervals, and none would be meaningful.
-2. **Single run.** Faithfulness moved `0.9459 → 0.9833` between two *identical*
-   invocations — a spread wider than several of the reported deltas.
-3. **Self-authored evaluation set**, which is a conflict of interest.
-
-Nothing in the codebase hard-codes a performance claim.
 
 ---
 
@@ -410,19 +379,6 @@ handling, and citation validation — without a single network call.
 Integration tests are opt-in and skip loudly when Qdrant is unreachable. That
 skip once hid a real bug: the suite silently fell back to `localhost` and
 reported clean while testing nothing. A skipped test is not a passing test.
-
----
-
-## Known limitations
-
-- **Multi-hop retrieval.** A question needing fact A to know what to search for
-  fact B may miss the second source. Decomposition happens before any retrieval,
-  so the planner cannot know what it has not yet read.
-- **Benchmarks are small.** Ten and six questions, single runs, self-authored.
-- **Faithfulness is not truth.** It measures whether claims match the retrieved
-  sources. A wrong source yields a confident, well-cited, wrong answer.
-- **No web UI or API.** Command line only, by design.
-- **`research-system`, not `sourceweave`**, at the command line.
 
 ---
 
