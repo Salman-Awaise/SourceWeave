@@ -27,6 +27,11 @@ RESULTS.md
 docx/
 data/documents/
 data/fixtures/
-docs/
+# Ignore docs/ contents rather than the directory itself: git will not
+# descend into an excluded directory, so a negation inside one never fires.
+docs/*
+!docs/images/
+# Pre-fix capture, kept locally as evidence but not shipped.
+docs/images/shot_04_hybrid.png
 eval/datasets/meridian_qa.json
 eval/results/
