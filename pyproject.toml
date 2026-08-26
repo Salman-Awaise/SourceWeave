@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Stateful multi-agent research assistant: Planner -> Retriever -> Generator -> Verifier."
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "Diamond" }]
+authors = [{ name = "Salman Awaise" }, { name = "Ziyan Ahmed" }]
 keywords = ["rag", "langgraph", "multi-agent", "qdrant", "retrieval"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
@@ -56,7 +56,7 @@ all = [
 research-system = "research_system.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/example/multi-agent-research-system"
+Homepage = "https://github.com/Salman-Awaise/SourceWeave"
 
 [dependency-groups]
 dev = [
