@@ -26,5 +26,7 @@ CLAUDE.md
 RESULTS.md
 docx/
 data/documents/
+data/fixtures/
+docs/
 eval/datasets/meridian_qa.json
 eval/results/

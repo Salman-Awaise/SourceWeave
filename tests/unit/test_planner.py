@@ -96,3 +96,16 @@ def test_prompt_lists_only_available_backends(deps):
 
     assert "vector" in prompt
     assert "web (live search)" not in prompt
+
+
+def test_prompt_instructs_the_model_to_resolve_pronouns():
+    """Sub-queries are searched independently, so back-references must be resolved.
+
+    A live run decomposed "which retriever does RAG use, and what accuracy does
+    it reach" into a sub-query about RAG's accuracy rather than the retriever's,
+    so the primary source was never retrieved.
+    """
+    from research_system.agents.planner import PLANNER_SYSTEM_PROMPT
+
+    assert "resolve every pronoun" in PLANNER_SYSTEM_PROMPT
+    assert "stand alone" in PLANNER_SYSTEM_PROMPT

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
 from research_system.agents.retriever import deduplicate, reciprocal_rank_fusion
@@ -102,3 +104,162 @@ def test_deduplicate_keeps_first_occurrence():
 
     assert len(out) == 2
     assert out[0].score == 0.9
+
+
+# --- weighted fusion: primary sources outrank summaries --------------------
+def typed(content: str, source_type: str, source: str = "s") -> RetrievedDocument:
+    return RetrievedDocument(
+        content=content, source=source, score=0.5, metadata={"source_type": source_type}
+    )
+
+
+def test_no_weights_behaves_exactly_like_plain_rrf():
+    docs = [typed("a", "document"), typed("b", "web", source="t")]
+    fused = reciprocal_rank_fusion([docs], k=60)
+
+    assert fused[0].score == pytest.approx(1 / 61)
+    assert fused[1].score == pytest.approx(1 / 62)
+
+
+def test_a_weighted_document_outranks_a_higher_placed_web_result():
+    """The exact case from the live run: both appear once, web listed first."""
+    web_list = [typed("web summary", "web", source="blog")]
+    doc_list = [typed("primary paper", "document", source="paper.pdf")]
+
+    fused = reciprocal_rank_fusion(
+        [web_list, doc_list], k=60, weights={"document": 1.5, "web": 1.0}
+    )
+
+    assert fused[0].content == "primary paper"
+    assert fused[0].score == pytest.approx(1.5 / 61)
+    assert fused[1].score == pytest.approx(1.0 / 61)
+
+
+def test_weighting_is_decisive_not_marginal():
+    """Documents the real behaviour: a weight beats a large rank advantage.
+
+    The 1/(k+rank) curve is nearly flat, so at k=60 a 1.5x weight still wins
+    from 20 places below. This is deliberate but worth pinning down, because it
+    means any weight above 1.0 is a preference rather than a nudge.
+    """
+    web_list = [typed("web first", "web", source="w")]
+    doc_list = [typed(f"filler {i}", "web", source=f"f{i}") for i in range(20)]
+    doc_list.append(typed("late document", "document", source="paper.pdf"))
+
+    fused = reciprocal_rank_fusion(
+        [web_list, doc_list], k=60, weights={"document": 1.5, "web": 1.0}
+    )
+
+    assert fused[0].content == "late document"
+    assert fused[0].score == pytest.approx(1.5 / 81)
+
+
+def test_a_large_enough_rank_gap_still_beats_the_weight():
+    """The weight is finite: far enough down, rank wins again."""
+    web_list = [typed("web first", "web", source="w")]
+    doc_list = [typed(f"filler {i}", "web", source=f"f{i}") for i in range(40)]
+    doc_list.append(typed("very late document", "document", source="paper.pdf"))
+
+    fused = reciprocal_rank_fusion(
+        [web_list, doc_list], k=60, weights={"document": 1.2, "web": 1.0}
+    )
+
+    assert fused[0].content == "web first"
+
+
+def test_unlisted_source_types_default_to_weight_one():
+    docs = [RetrievedDocument(content="x", source="s", score=0.5)]  # no source_type
+    fused = reciprocal_rank_fusion([docs], k=60, weights={"document": 1.5})
+
+    assert fused[0].score == pytest.approx(1 / 61)
+    assert fused[0].metadata["rrf_weight"] == 1.0
+
+
+def test_applied_weight_is_recorded_for_traceability():
+    fused = reciprocal_rank_fusion([[typed("a", "document")]], k=60, weights={"document": 1.5})
+
+    assert fused[0].metadata["rrf_weight"] == 1.5
+
+
+def test_zero_weight_suppresses_a_source_type():
+    fused = reciprocal_rank_fusion(
+        [[typed("web", "web", source="w"), typed("doc", "document", source="d")]],
+        k=60,
+        weights={"web": 0.0, "document": 1.0},
+    )
+
+    assert fused[0].content == "doc"
+    assert fused[-1].score == 0.0
+
+
+# --- the cap must not erase an entire source type --------------------------
+def test_weighting_alone_can_erase_a_source_type():
+    """The problem being solved: without a floor, web disappears completely."""
+    docs = [typed(f"doc {i}", "document", source=f"d{i}") for i in range(10)]
+    webs = [typed(f"web {i}", "web", source=f"w{i}") for i in range(10)]
+
+    fused = reciprocal_rank_fusion(
+        [docs, webs], k=60, top_n=10, weights={"document": 1.2, "web": 1.0}, min_per_type=0
+    )
+
+    assert {d.source_type for d in fused} == {"document"}
+
+
+def test_a_floor_keeps_both_source_types_in_the_cap():
+    docs = [typed(f"doc {i}", "document", source=f"d{i}") for i in range(10)]
+    webs = [typed(f"web {i}", "web", source=f"w{i}") for i in range(10)]
+
+    fused = reciprocal_rank_fusion(
+        [docs, webs], k=60, top_n=10, weights={"document": 1.2, "web": 1.0}, min_per_type=2
+    )
+
+    counts = Counter(d.source_type for d in fused)
+    assert len(fused) == 10
+    assert counts["web"] >= 2
+    assert counts["document"] == 8
+
+
+def test_the_promoted_web_results_are_the_highest_scoring_ones():
+    docs = [typed(f"doc {i}", "document", source=f"d{i}") for i in range(10)]
+    webs = [typed(f"web {i}", "web", source=f"w{i}") for i in range(10)]
+
+    fused = reciprocal_rank_fusion(
+        [docs, webs], k=60, top_n=10, weights={"document": 1.2, "web": 1.0}, min_per_type=2
+    )
+
+    kept = [d.content for d in fused if d.source_type == "web"]
+    assert kept == ["web 0", "web 1"]  # top of their own ranking, not arbitrary
+
+
+def test_floor_is_a_noop_when_only_one_source_type_exists():
+    docs = [typed(f"doc {i}", "document", source=f"d{i}") for i in range(10)]
+
+    fused = reciprocal_rank_fusion([docs], k=60, top_n=5, weights={"document": 1.2}, min_per_type=2)
+
+    assert len(fused) == 5
+    assert all(d.source_type == "document" for d in fused)
+
+
+def test_floor_does_not_pad_beyond_what_a_type_actually_returned():
+    docs = [typed(f"doc {i}", "document", source=f"d{i}") for i in range(10)]
+    webs = [typed("only web", "web", source="w0")]
+
+    fused = reciprocal_rank_fusion(
+        [docs, webs], k=60, top_n=10, weights={"document": 1.2, "web": 1.0}, min_per_type=2
+    )
+
+    counts = Counter(d.source_type for d in fused)
+    assert counts["web"] == 1  # asked for 2, only 1 exists
+    assert len(fused) == 10
+
+
+def test_results_stay_score_ordered_after_promotion():
+    docs = [typed(f"doc {i}", "document", source=f"d{i}") for i in range(10)]
+    webs = [typed(f"web {i}", "web", source=f"w{i}") for i in range(10)]
+
+    fused = reciprocal_rank_fusion(
+        [docs, webs], k=60, top_n=10, weights={"document": 1.2, "web": 1.0}, min_per_type=2
+    )
+
+    scores = [d.score for d in fused]
+    assert scores == sorted(scores, reverse=True)

@@ -25,6 +25,11 @@ RULES:
 2. Cite sources using [Source N] notation for every factual claim
 3. If the context doesn't contain enough information, say so explicitly
 4. Do NOT fabricate information not present in the sources
+5. When an indexed document and a web page both cover the same fact, cite the
+   document: it is the primary source and the web page is usually a summary of
+   it. Cite the web page only for facts the documents do not contain.
+6. Answer the question that was asked. If a source discusses a related but
+   different subject, do not substitute it for the one asked about.
 
 Respond with a single JSON object and nothing else:
 {
@@ -82,6 +87,24 @@ def validate_citations(
     return valid, warnings
 
 
+def memory_not_evidence_note(state: AgentState) -> str:
+    """Explain, when declining, that recalled memory is deliberately not evidence.
+
+    Memory reaches the planner only -- it steers *what* gets searched. It is
+    never passed to this agent, because mem0 stores a model-written paraphrase
+    of a conversation, and asserting facts from that would break the guarantee
+    that every claim traces to a retrievable source. Without this note the
+    decline looks like memory is broken rather than deliberately excluded.
+    """
+    count = len(state.get("memory_context") or [])
+    if not count:
+        return ""
+    return (
+        f" {count} memory/memories were recalled for this user, but remembered "
+        "conversation is not used as evidence and cannot be cited."
+    )
+
+
 def build_generator_prompt(state: AgentState, deps: Dependencies) -> tuple[str, list[str]]:
     """Assemble the evidence prompt. Returns (prompt, warnings)."""
     warnings: list[str] = []
@@ -113,6 +136,9 @@ def generator_node(state: AgentState, deps: Dependencies) -> AgentState:
 
     # No evidence: answer honestly rather than asking the model to improvise.
     if not documents:
+        note = memory_not_evidence_note(state)
+        if note:
+            warnings.append("No documents were retrieved." + note)
         return AgentState(
             response=INSUFFICIENT_EVIDENCE_ANSWER,
             sources=[],
@@ -150,6 +176,7 @@ def generator_node(state: AgentState, deps: Dependencies) -> AgentState:
         warnings.append(
             f"The retrieved evidence does not cover this question "
             f"({len(documents)} document(s) retrieved, none relevant)."
+            + memory_not_evidence_note(state)
         )
         return AgentState(
             response=output.answer,

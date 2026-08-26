@@ -26,7 +26,7 @@ from typing import Any, Protocol, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from ..config import Settings, get_settings
-from ..errors import LLMError, StructuredOutputError
+from ..errors import LLMError, SchemaValidationError, StructuredOutputError
 
 logger = logging.getLogger(__name__)
 
@@ -141,27 +141,69 @@ def _extract_json_object(text: str) -> str:
     raise StructuredOutputError("model response contained an unterminated JSON object")
 
 
+def summarize_validation_error(exc: ValidationError) -> str:
+    """Compress a Pydantic error into one readable line.
+
+    The raw form runs to many lines and ends with a docs URL, which is noise in
+    a terminal that is already showing a fallback warning.
+    """
+    parts = []
+    for err in exc.errors()[:3]:
+        loc = ".".join(str(x) for x in err.get("loc", ())) or "<root>"
+        msg = str(err.get("msg", "")).removeprefix("Value error, ")
+        parts.append(f"{loc}: {msg}")
+    extra = "" if len(exc.errors()) <= 3 else f" (+{len(exc.errors()) - 3} more)"
+    return "; ".join(parts) + extra
+
+
 def parse_structured(text: str, schema: type[T]) -> T:
-    """Validate model text against `schema`, locating the JSON if needed."""
+    """Validate model text against `schema`, locating the JSON if needed.
+
+    Raises `SchemaValidationError` when the JSON parsed cleanly but its values
+    are invalid, and plain `StructuredOutputError` when nothing parseable was
+    found. Callers use that distinction to decide whether retrying in a
+    different output format could possibly help.
+    """
     candidates = [text.strip()]
     # Whole-text validation is tried first; locating an embedded object is a
     # bonus candidate, so its absence is not itself a failure here.
     with contextlib.suppress(StructuredOutputError):
         candidates.append(_extract_json_object(text))
 
-    last_error: Exception | None = None
+    def is_json_syntax_error(exc: ValidationError) -> bool:
+        """Pydantic reports malformed JSON as a ValidationError too.
+
+        Those carry type `json_invalid` and mean the text was never valid JSON,
+        which IS worth retrying in another output format -- unlike a genuine
+        schema violation.
+        """
+        errs = exc.errors()
+        return bool(errs) and all(e.get("type") == "json_invalid" for e in errs)
+
+    validation_error: ValidationError | None = None
+    parse_error: Exception | None = None
     for candidate in candidates:
         if not candidate:
             continue
         try:
             return schema.model_validate_json(candidate)
         except ValidationError as exc:
-            last_error = exc
-        except Exception as exc:  # malformed JSON
-            last_error = exc
+            if is_json_syntax_error(exc):
+                parse_error = exc  # not JSON at all -- another format may help
+            else:
+                # Well-formed JSON, wrong values: a content problem, not a
+                # formatting one.
+                validation_error = exc
+        except Exception as exc:  # not valid JSON at all
+            parse_error = exc
+
+    if validation_error is not None:
+        raise SchemaValidationError(
+            f"{schema.__name__} validation failed -> {summarize_validation_error(validation_error)}"
+        ) from validation_error
     raise StructuredOutputError(
-        f"model output did not match {schema.__name__}: {last_error}"
-    ) from last_error
+        f"no valid {schema.__name__} JSON in model output: {parse_error}"
+    ) from parse_error
 
 
 class LiteLLMClient:
@@ -289,9 +331,16 @@ class LiteLLMClient:
                 raise
             try:
                 return parse_structured(text, schema)
+            except SchemaValidationError as exc:
+                # The model produced clean JSON with invalid values. Another
+                # response format would not change the values, and re-sending
+                # the same prompt reproduces the same answer, so stop here and
+                # let the caller's fallback handle it.
+                logger.warning("%s; not retrying (a different format cannot fix values)", exc)
+                raise
             except StructuredOutputError as exc:
                 last_error = exc
-                logger.warning("structured output tier failed (%s), trying next", exc)
+                logger.warning("could not locate JSON (%s), trying next output format", exc)
 
         raise StructuredOutputError(
             f"could not obtain valid {schema.__name__} from {self._model!r}: {last_error}"

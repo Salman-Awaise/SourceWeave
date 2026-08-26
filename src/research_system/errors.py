@@ -40,6 +40,16 @@ class StructuredOutputError(LLMError):
     """The model returned output that could not be validated against a schema."""
 
 
+class SchemaValidationError(StructuredOutputError):
+    """The model returned well-formed JSON whose *values* violate the schema.
+
+    Distinct from a parse failure: the response format was fine, so asking the
+    provider for a different output format will not help. Re-sending the same
+    prompt reliably reproduces the same invalid value, so callers should fall
+    back rather than retry.
+    """
+
+
 class IngestionError(ResearchSystemError):
     """A document source could not be read or indexed."""
 

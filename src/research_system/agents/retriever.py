@@ -10,7 +10,7 @@ never summed directly -- only ranks are.
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 
 from ..core.deps import Dependencies
 from ..core.state import AgentState, RetrievedDocument
@@ -20,14 +20,30 @@ logger = logging.getLogger(__name__)
 
 
 def reciprocal_rank_fusion(
-    ranked_lists: list[list[RetrievedDocument]], k: int = 60, top_n: int | None = None
+    ranked_lists: list[list[RetrievedDocument]],
+    k: int = 60,
+    top_n: int | None = None,
+    weights: dict[str, float] | None = None,
+    min_per_type: int = 0,
 ) -> list[RetrievedDocument]:
-    """Fuse ranked lists: score = sum over lists of 1 / (k + rank + 1), rank 0-based.
+    """Fuse ranked lists: score = sum over lists of w / (k + rank + 1), rank 0-based.
+
+    `weights` maps a document's `source_type` to a multiplier, defaulting to 1.0
+    for anything unlisted. This exists because plain RRF only distinguishes
+    documents that appear in *several* lists; when each result appears once,
+    every score collapses to roughly 1/(k+1) and the ordering between a primary
+    source and a web summary becomes arbitrary.
+
+    Note that weighting is decisive rather than marginal: because the 1/(k+rank)
+    curve is nearly flat for small ranks, a weight of 1.2 outranks an unweighted
+    result some twelve places higher. Treat any value above 1.0 as "prefer this
+    source type", not as a nudge.
 
     Inputs are never mutated; the returned documents are copies carrying the
     fused score, with the original backend score preserved in
     `metadata["native_score"]`.
     """
+    weights = weights or {}
     fused_scores: dict[str, float] = {}
     representatives: OrderedDict[str, RetrievedDocument] = OrderedDict()
     appearances: dict[str, int] = {}
@@ -35,7 +51,8 @@ def reciprocal_rank_fusion(
     for ranked in ranked_lists:
         for rank, document in enumerate(ranked):
             key = document.dedup_key
-            fused_scores[key] = fused_scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+            weight = weights.get(document.source_type, 1.0)
+            fused_scores[key] = fused_scores.get(key, 0.0) + weight / (k + rank + 1)
             appearances[key] = appearances.get(key, 0) + 1
             if key not in representatives:
                 representatives[key] = document
@@ -53,6 +70,7 @@ def reciprocal_rank_fusion(
         metadata.setdefault("native_score", source_doc.score)
         metadata["rrf_score"] = fused_scores[key]
         metadata["rrf_appearances"] = appearances[key]
+        metadata["rrf_weight"] = weights.get(source_doc.source_type, 1.0)
         results.append(
             RetrievedDocument(
                 content=source_doc.content,
@@ -62,7 +80,48 @@ def reciprocal_rank_fusion(
             )
         )
 
-    return results[:top_n] if top_n is not None else results
+    if top_n is None or len(results) <= top_n:
+        return results
+    return cap_preserving_source_types(results, top_n, min_per_type)
+
+
+def cap_preserving_source_types(
+    ordered: list[RetrievedDocument], top_n: int, min_per_type: int
+) -> list[RetrievedDocument]:
+    """Truncate to `top_n` without dropping any source type entirely.
+
+    Score order is kept wherever possible; the only change is that each source
+    type present in the candidates is guaranteed up to `min_per_type` slots,
+    taken from whichever type is most over-represented. Without this, a weighted
+    fusion can silently remove every web result from a question that needed one.
+    """
+    if min_per_type <= 0:
+        return ordered[:top_n]
+
+    types = {doc.source_type for doc in ordered}
+    if len(types) < 2:
+        return ordered[:top_n]
+
+    selected = ordered[:top_n]
+    for source_type in types:
+        have = sum(1 for doc in selected if doc.source_type == source_type)
+        need = min(min_per_type, sum(1 for doc in ordered if doc.source_type == source_type)) - have
+        for _ in range(max(0, need)):
+            promote = next(
+                (d for d in ordered if d.source_type == source_type and d not in selected), None
+            )
+            if promote is None:
+                break
+            # Displace the lowest-ranked member of the largest other group.
+            counts = Counter(d.source_type for d in selected)
+            biggest = max(counts, key=lambda t: (counts[t], t != source_type))
+            if biggest == source_type or counts[biggest] <= min_per_type:
+                break
+            drop = next(d for d in reversed(selected) if d.source_type == biggest)
+            selected[selected.index(drop)] = promote
+
+    selected.sort(key=lambda d: -d.score)
+    return selected
 
 
 def deduplicate(documents: list[RetrievedDocument]) -> list[RetrievedDocument]:
@@ -212,7 +271,11 @@ def retriever_node(state: AgentState, deps: Dependencies) -> AgentState:
         ranked_lists.append(prior_documents)
 
     documents = reciprocal_rank_fusion(
-        ranked_lists, k=settings.rrf_k, top_n=settings.max_retrieval_docs
+        ranked_lists,
+        k=settings.rrf_k,
+        top_n=settings.max_retrieval_docs,
+        weights=settings.source_weights,
+        min_per_type=settings.min_per_source_type,
     )
 
     if not documents:

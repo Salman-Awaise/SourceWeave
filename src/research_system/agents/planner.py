@@ -29,6 +29,13 @@ Respond in JSON format:
 }
 
 Keep sub-questions specific, focused, and non-overlapping. Each should be answerable independently.
+
+Each sub-question is searched on its own, with no access to the others, so it
+must stand alone. Before writing them, resolve every pronoun and back-reference
+against the original question and substitute the thing it refers to. If the user
+asks "which retriever does X use, and what accuracy does IT reach", the second
+sub-question is about the retriever, not about X. Naming the wrong subject sends
+the search after the wrong documents and the right source is never found.
 """
     + UNTRUSTED_INPUT_NOTICE
 )
@@ -95,8 +102,11 @@ def planner_node(state: AgentState, deps: Dependencies) -> AgentState:
     except (LLMError, ValueError) as exc:
         strategy = _available_fallback_strategy(deps)
         sub_queries = [original_query]
+        # Keep this to one line: the full provider/validation detail is already
+        # in the log, and a multi-line traceback in the answer output is noise.
+        detail = str(exc).splitlines()[0][:160]
         warnings.append(
-            f"Planner output was unusable ({exc}); falling back to the original "
+            f"Planner output was unusable ({detail}); falling back to the original "
             f"question with the {strategy!r} strategy."
         )
         logger.warning("planner fallback: %s", exc)

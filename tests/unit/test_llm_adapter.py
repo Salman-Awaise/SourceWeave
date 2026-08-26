@@ -5,12 +5,13 @@ from __future__ import annotations
 import pytest
 
 from research_system.adapters.llm import (
+    FakeLLMClient,
     _extract_json_object,
     _is_retryable,
     normalize_model_name,
     parse_structured,
 )
-from research_system.errors import StructuredOutputError
+from research_system.errors import SchemaValidationError, StructuredOutputError
 from research_system.schemas import GeneratorOutput, PlannerOutput
 
 
@@ -135,3 +136,52 @@ def test_fake_client_raises_scripted_exceptions(llm):
 def test_fake_client_fails_loudly_when_exhausted(llm):
     with pytest.raises(AssertionError, match="ran out of responses"):
         llm.complete_structured(system="s", user="u", schema=PlannerOutput)
+
+
+# --- validation failures must not be retried as format failures ------------
+def test_invalid_enum_value_raises_schema_validation_error():
+    """Well-formed JSON with a bad value is a content problem, not a format one."""
+    text = '{"sub_queries": ["a"], "retrieval_strategy": "memory"}'
+
+    with pytest.raises(SchemaValidationError, match="retrieval_strategy"):
+        parse_structured(text, PlannerOutput)
+
+
+def test_unparseable_text_raises_plain_structured_output_error():
+    with pytest.raises(StructuredOutputError) as info:
+        parse_structured("I refuse to answer.", PlannerOutput)
+
+    assert not isinstance(info.value, SchemaValidationError)
+
+
+def test_validation_error_message_is_one_short_line():
+    """The raw Pydantic form is multi-line and ends in a docs URL."""
+    try:
+        parse_structured('{"sub_queries": ["a"], "retrieval_strategy": "memory"}', PlannerOutput)
+    except SchemaValidationError as exc:
+        msg = str(exc)
+        assert "\n" not in msg
+        assert "pydantic.dev" not in msg
+        assert "retrieval_strategy" in msg
+        assert len(msg) < 200
+    else:
+        raise AssertionError("expected SchemaValidationError")
+
+
+def test_schema_validation_error_is_still_a_structured_output_error():
+    """Existing callers catching StructuredOutputError must keep working."""
+    assert issubclass(SchemaValidationError, StructuredOutputError)
+
+
+def test_planner_still_falls_back_on_an_invalid_strategy(deps):
+    """End to end: the bad value is caught once and the fallback runs."""
+    from research_system.agents.planner import planner_node
+    from research_system.core.state import create_initial_state
+
+    deps.llm = FakeLLMClient(['{"sub_queries": ["a"], "retrieval_strategy": "memory"}'])
+    update = planner_node(create_initial_state("q"), deps)
+
+    assert update["retrieval_strategy"] in ("vector", "web", "hybrid")
+    assert len(deps.llm.calls) == 1  # not retried
+    warning = " ".join(update["warnings"])
+    assert "\n" not in warning

@@ -202,3 +202,48 @@ def test_oversized_context_is_truncated_with_a_warning(deps):
     assert "truncated" in prompt
     assert any("truncated" in w for w in warnings)
     assert len(prompt) < 1000
+
+
+# --- memory is deliberately not evidence -----------------------------------
+def test_declining_explains_that_memory_was_recalled_but_unused(deps):
+    """Memory steers retrieval only; a decline should say so, not look broken."""
+    state = state_with([])
+    state["memory_context"] = ["User only cares about the DPR paper", "User prefers brevity"]
+
+    update = generator_node(state, deps)
+
+    assert update["answered"] is False
+    note = " ".join(update["warnings"])
+    assert "2 memory/memories were recalled" in note
+    assert "not used as evidence" in note
+
+
+def test_declining_with_documents_also_explains_memory(deps):
+    docs = [doc("about cats")]
+    state = state_with(docs)
+    state["memory_context"] = ["User only cares about the DPR paper"]
+    deps.llm = FakeLLMClient(
+        [GeneratorOutput(answer="Not covered.", confidence=0.2, sources_used=[], answered=False)]
+    )
+
+    update = generator_node(state, deps)
+
+    note = " ".join(update["warnings"])
+    assert "1 memory/memories were recalled" in note
+    assert "cannot be cited" in note
+
+
+def test_no_memory_note_when_no_memories_were_recalled(deps):
+    update = generator_node(state_with([]), deps)
+
+    assert not any("memory" in w.lower() for w in update["warnings"])
+
+
+def test_memory_never_reaches_the_generator_prompt(deps):
+    """The guarantee itself: memory text must not appear in the evidence prompt."""
+    state = state_with([doc("real evidence")])
+    state["memory_context"] = ["SECRET_MEMORY_MARKER user likes DPR"]
+
+    prompt, _ = build_generator_prompt(state, deps)
+
+    assert "SECRET_MEMORY_MARKER" not in prompt

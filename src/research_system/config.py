@@ -67,6 +67,34 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=2048, ge=64, le=32768)
     qdrant_score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
     rrf_k: int = Field(default=60, ge=1)
+    document_weight: float = Field(default=1.2, ge=0.0, le=10.0)
+    """Fusion weight for indexed documents. Above 1.0 favours primary sources.
+
+    Be aware this is a strong preference, not a mild tiebreak. RRF with
+    RRF_K=60 is very flat -- rank 0 scores 1/61 and rank 4 scores 1/65 -- so at
+    1.2 a document still outranks a top web result from about 12 places below.
+    Since a backend returns only SIMILARITY_TOP_K (default 5) results, any value
+    above 1.0 means documents outrank web across the whole realistic range.
+
+    That is intended: a web page is usually a summary of the primary source.
+    The trade-off is that when candidates exceed MAX_RETRIEVAL_DOCS, web results
+    can be squeezed out entirely, which hurts questions where currency matters.
+    Set both weights to 1.0 to restore plain unweighted RRF.
+    """
+
+    min_per_source_type: int = Field(default=2, ge=0, le=20)
+    """Slots reserved for each source type that returned results.
+
+    Weighting decides ordering, but on its own it can push a whole backend out
+    of the final cap -- a 1.2 document weight removed every web result from a
+    question that explicitly asked for recent developments. Reserving a couple
+    of slots keeps hybrid retrieval genuinely hybrid. Set to 0 for pure
+    score-ordered truncation.
+    """
+
+    web_weight: float = Field(default=1.0, ge=0.0, le=10.0)
+    """Fusion weight for live web results. Raise above `document_weight` for
+    deployments where recency matters more than provenance."""
     memory_search_limit: int = Field(default=3, ge=1, le=50)
 
     # --- hard safety bounds (not env-tuned by design) --------------------
@@ -103,6 +131,11 @@ class Settings(BaseSettings):
         if model.startswith(("gpt", "o1", "o3", "o4", "text-")):
             return "openai"
         return "unknown"
+
+    @property
+    def source_weights(self) -> dict[str, float]:
+        """Per-source-type fusion weights. Unlisted types default to 1.0."""
+        return {"document": self.document_weight, "web": self.web_weight}
 
     @property
     def vector_available(self) -> bool:
