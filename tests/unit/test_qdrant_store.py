@@ -8,6 +8,7 @@ from research_system.adapters.qdrant_store import (
     InMemoryVectorStore,
     VectorPoint,
     _build_filter,
+    _missing_index_fields,
     deterministic_point_id,
 )
 from research_system.errors import VectorStoreError
@@ -169,3 +170,37 @@ def test_filter_builds_one_condition_per_key():
     assert built is not None
     assert len(built.must) == 2
     assert {c.key for c in built.must} == {"kind", "year"}
+
+
+# --- Qdrant Cloud requires an index before filtering -----------------------
+CLOUD_400 = (
+    "Unexpected Response: 400 (Bad Request) Raw response content: "
+    'b\'{"status":{"error":"Bad request: Index required but not found for '
+    '\\\\"kind\\\\" of one of the following types: [keyword]."}}\''
+)
+
+
+def test_missing_index_field_is_detected_from_the_cloud_error():
+    assert _missing_index_fields(CLOUD_400, {"kind": "memo"}) == ["kind"]
+
+
+def test_only_fields_we_filtered_on_are_reported():
+    """An unrelated field named in the error must not trigger index creation."""
+    assert _missing_index_fields(CLOUD_400, {"year": 2026}) == []
+
+
+def test_unrelated_400s_are_not_treated_as_a_missing_index():
+    assert _missing_index_fields("400 Bad Request: malformed vector", {"kind": "memo"}) == []
+
+
+def test_no_filter_means_nothing_to_index():
+    assert _missing_index_fields(CLOUD_400, None) == []
+    assert _missing_index_fields(CLOUD_400, {}) == []
+
+
+def test_multiple_missing_fields_are_all_reported():
+    msg = (
+        "Index required but not found for kind and also year of one of the "
+        "following types: [keyword]"
+    )
+    assert sorted(_missing_index_fields(msg, {"kind": "a", "year": 1})) == ["kind", "year"]

@@ -15,21 +15,34 @@ from research_system.config import Settings
 from research_system.core.deps import Dependencies
 from research_system.core.state import RetrievedDocument
 
+# Credentials scrubbed from every test's environment, so a developer's real
+# .env or shell can never influence a result.
+_SCRUBBED = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "TAVILY_API_KEY",
+    "MEM0_API_KEY",
+    "LANGCHAIN_API_KEY",
+    "QDRANT_API_KEY",
+    "QDRANT_URL",
+    "DEFAULT_LLM",
+)
+
+# ...except the Qdrant connection during an opt-in integration run, which needs
+# a real endpoint by definition. Scrubbing these unconditionally silently forced
+# every integration test back to localhost, making the documented QDRANT_URL
+# override impossible.
+_INTEGRATION_KEEPS = ("QDRANT_URL", "QDRANT_API_KEY")
+
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch):
+def isolated_env(monkeypatch, request):
     """Stop a developer's real .env or shell keys from leaking into tests."""
-    for name in (
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "TAVILY_API_KEY",
-        "MEM0_API_KEY",
-        "LANGCHAIN_API_KEY",
-        "QDRANT_API_KEY",
-        "QDRANT_URL",
-        "DEFAULT_LLM",
-    ):
-        monkeypatch.delenv(name, raising=False)
+    integration = request.node.get_closest_marker("integration") is not None
+    keep = _INTEGRATION_KEEPS if (integration and os.getenv("RUN_INTEGRATION") == "1") else ()
+    for name in _SCRUBBED:
+        if name not in keep:
+            monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
 
 

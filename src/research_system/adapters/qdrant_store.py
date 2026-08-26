@@ -214,6 +214,47 @@ class QdrantVectorStore:
 
         query_filter = _build_filter(metadata_filter)
         try:
+            return self._search(collection, vector, top_k, score_threshold, query_filter)
+        except VectorStoreError as exc:
+            # Qdrant Cloud refuses to filter on a payload field with no index,
+            # where a local instance allows it. Create the missing index and
+            # retry once, so metadata filtering behaves the same on both.
+            missing = _missing_index_fields(str(exc), metadata_filter)
+            if not missing:
+                raise
+            for field in missing:
+                self._ensure_payload_index(collection, field)
+            logger.info("created payload index for %s on %r", missing, collection)
+            return self._search(collection, vector, top_k, score_threshold, query_filter)
+
+    def _ensure_payload_index(self, collection: str, field: str) -> None:
+        """Add a keyword payload index so `field` becomes filterable."""
+        from qdrant_client.models import PayloadSchemaType
+
+        client = self._get_client()
+        try:
+            client.create_payload_index(
+                collection_name=collection,
+                field_name=field,
+                field_schema=PayloadSchemaType.KEYWORD,
+                wait=True,
+            )
+        except Exception as exc:
+            raise VectorStoreError(
+                f"could not create a payload index for {field!r} on {collection!r}: {exc}. "
+                f"Filtering on {field!r} requires one."
+            ) from exc
+
+    def _search(
+        self,
+        collection: str,
+        vector: list[float],
+        top_k: int,
+        score_threshold: float | None,
+        query_filter: Any,
+    ) -> list[RetrievedDocument]:
+        client = self._get_client()
+        try:
             # query_points is the current API; older clients only have search().
             if hasattr(client, "query_points"):
                 response = client.query_points(
@@ -247,6 +288,20 @@ class QdrantVectorStore:
             return int(client.count(collection_name=collection, exact=True).count)
         except Exception as exc:
             raise VectorStoreError(f"count on {collection!r} failed: {exc}") from exc
+
+
+def _missing_index_fields(message: str, metadata_filter: dict[str, Any] | None) -> list[str]:
+    """Which filtered fields does Qdrant say need an index?
+
+    Cloud reports: `Index required but not found for "kind" ...`. Only fields we
+    actually filtered on are returned, so an unrelated 400 is never treated as a
+    missing index.
+    """
+    if not metadata_filter or "index required but not found" not in message.lower():
+        return []
+    # The field name arrives escaped inside the raw response body
+    # (\"kind\"), so match the bare name rather than a quoted form.
+    return [field for field in metadata_filter if field in message]
 
 
 def _build_filter(metadata_filter: dict[str, Any] | None):  # type: ignore[no-untyped-def]
