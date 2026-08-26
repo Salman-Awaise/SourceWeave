@@ -205,7 +205,8 @@ class QdrantVectorStore:
         score_threshold: float | None = None,
         metadata_filter: dict[str, Any] | None = None,
     ) -> list[RetrievedDocument]:
-        client = self._get_client()
+        # The client is fetched inside `_search`; this method only validates and
+        # handles the missing-index retry.
         if not self.collection_exists(collection):
             raise VectorStoreError(
                 f"Qdrant collection {collection!r} does not exist. "
