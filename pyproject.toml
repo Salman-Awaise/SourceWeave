@@ -1,0 +1,110 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "research-system"
+version = "0.1.0"
+description = "Stateful multi-agent research assistant: Planner -> Retriever -> Generator -> Verifier."
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Diamond" }]
+keywords = ["rag", "langgraph", "multi-agent", "qdrant", "retrieval"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+  # langgraph brings langchain-core, which brings the langsmith SDK that powers
+  # optional tracing. Neither is imported directly, so neither is declared here.
+  "langgraph>=0.2",
+  "llama-index-core>=0.11",
+  "llama-index-readers-file>=0.2",
+  "qdrant-client>=1.12",
+  "litellm>=1.50",
+  "tavily-python>=0.5",
+  "openai>=1.50",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "python-dotenv>=1.0",
+  "rich>=13.7",
+  "typer>=0.12",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+memory = ["mem0ai>=0.1"]
+eval = [
+  "ragas>=0.2",
+  "datasets>=3.0",
+  "langchain-openai>=0.2",
+  # ragas 0.4.x imports langchain_community.chat_models.vertexai, which
+  # langchain-community 0.4 removed. Cap it until ragas drops that import.
+  "langchain-community<0.4",
+]
+all = [
+  "mem0ai>=0.1",
+  "ragas>=0.2",
+  "datasets>=3.0",
+  "langchain-openai>=0.2",
+  "langchain-community<0.4",
+]
+
+[project.scripts]
+research-system = "research_system.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/example/multi-agent-research-system"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.2",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-requests>=2.32",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/research_system"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = ["B008"]  # typer uses function calls in argument defaults
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+# The agent modules embed the system prompts verbatim from the build pack.
+# Reflowing them would change the prompt text, so long lines are allowed here.
+"src/research_system/agents/*.py" = ["E501"]
+
+[tool.mypy]
+# 3.12 matches the interpreter this project is developed on. The package still
+# supports 3.11 (see requires-python); pinning mypy to 3.11 fails because
+# numpy's bundled stubs use 3.12-only `type` statements.
+python_version = "3.12"
+files = ["src/research_system"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+  "integration: requires a live service (Qdrant); opt-in via RUN_INTEGRATION=1",
+  "paid: requires real paid API credentials; opt-in via RUN_PAID=1",
+]
+
+[tool.coverage.run]
+source = ["src/research_system"]
+branch = true

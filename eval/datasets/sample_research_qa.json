@@ -1,0 +1,26 @@
+[
+  {
+    "question": "What retrieval strategies does the research system support, and when is each one appropriate?",
+    "ground_truth": "Three strategies. 'vector' searches indexed documents in Qdrant and suits questions about a specific domain that has been ingested. 'web' uses Tavily live search and suits questions needing real-time or recent information. 'hybrid' runs both and fuses the results, and is the default."
+  },
+  {
+    "question": "How does the system decide whether a generated answer is trustworthy?",
+    "ground_truth": "A verifier agent extracts individual factual claims from the answer and checks each against the retrieved sources, classifying them supported or unsupported. The faithfulness score is the number of supported claims divided by total claims. The answer is marked verified when that score meets the configured faithfulness threshold, which defaults to 0.7."
+  },
+  {
+    "question": "What happens when verification fails?",
+    "ground_truth": "The verifier turns the unsupported claims into new focused retrieval queries and the graph loops back to the retriever, not the planner. The new evidence is merged with the prior evidence, deduplicated and re-ranked. This repeats up to MAX_VERIFICATION_RETRIES times, which defaults to 2, after which the answer is returned marked unverified."
+  },
+  {
+    "question": "How are results from document search and web search combined into one ranked list?",
+    "ground_truth": "With Reciprocal Rank Fusion. Each backend and sub-query pair produces its own ranked list, and every document accumulates a score of 1/(k + rank + 1) across the lists it appears in, where k defaults to 60. Documents are deduplicated by a stable key derived from normalized content plus canonical source, then the fused list is capped at MAX_RETRIEVAL_DOCS."
+  },
+  {
+    "question": "Why does re-running ingestion on the same folder not duplicate the indexed data?",
+    "ground_truth": "Qdrant point IDs are deterministic. Each ID is a UUIDv5 derived from the source filename, the chunk position within that file, and a hash of the normalized chunk text. Re-ingesting unchanged files produces identical IDs, so the upsert overwrites the existing points rather than adding new ones and the collection size stays the same."
+  },
+  {
+    "question": "What does the system do if only one retrieval backend is configured?",
+    "ground_truth": "It depends on the strategy. Hybrid retrieval degrades gracefully: it continues with whichever backend is available and records a warning. An explicitly requested 'vector' or 'web' strategy whose only backend is unavailable raises a typed, actionable error rather than silently answering from a different source."
+  }
+]
