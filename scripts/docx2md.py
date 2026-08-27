@@ -4,7 +4,10 @@ Headings come from paragraph styles, ASCII diagrams from PreformattedText runs
 (grouped into fenced blocks), and tables are rebuilt from the table XML rather
 than flattened, so they render on GitHub.
 """
-import re, sys, zipfile, html
+
+import re
+import sys
+import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -36,8 +39,9 @@ def is_list(p):
 def table_md(tbl):
     rows = []
     for tr in tbl.findall(f"{W}tr"):
-        cells = [" ".join(para_text(p).split()) for tc in tr.findall(f"{W}tc")
-                 for p in [tc]][:0]  # placeholder
+        cells = [" ".join(para_text(p).split()) for tc in tr.findall(f"{W}tc") for p in [tc]][
+            :0
+        ]  # placeholder
         cells = []
         for tc in tr.findall(f"{W}tc"):
             text = " ".join(" ".join(para_text(p) for p in tc.findall(f".//{W}p")).split())
@@ -49,8 +53,7 @@ def table_md(tbl):
     width = max(len(r) for r in rows)
     rows = [r + [""] * (width - len(r)) for r in rows]
     head, *body = rows
-    md = ["| " + " | ".join(head) + " |",
-          "|" + "|".join(["---"] * width) + "|"]
+    md = ["| " + " | ".join(head) + " |", "|" + "|".join(["---"] * width) + "|"]
     md += ["| " + " | ".join(r) + " |" for r in body]
     return "\n".join(md)
 
@@ -127,5 +130,11 @@ for f in sorted(src.glob("*.docx")):
         f"> Regenerate with `python scripts/docx2md.py` after editing the Word file.\n"
     )
     out = dest / NAMES.get(title, f.stem.lower().replace(" ", "-") + ".md")
+    # The Markdown copies were edited after conversion and are the current
+    # version. Regenerating silently would discard that work, so overwriting an
+    # existing file has to be asked for explicitly.
+    if out.exists() and "--force" not in sys.argv:
+        print(f"  {f.name:42} -> SKIPPED, {out} exists (pass --force to overwrite)")
+        continue
     out.write_text(header + "\n" + md + "\n", encoding="utf-8")
     print(f"  {f.name:42} -> {out}  ({len(md.splitlines())} lines)")
