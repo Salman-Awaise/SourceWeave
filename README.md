@@ -401,4 +401,4 @@ reported clean while testing nothing. A skipped test is not a passing test.
 
 ## Licence
 
-MIT.
+MIT — see [LICENSE](LICENSE).
