@@ -31,6 +31,7 @@ data/fixtures/
 # descend into an excluded directory, so a negation inside one never fires.
 docs/*
 !docs/images/
+!docs/design/
 # Pre-fix capture, kept locally as evidence but not shipped.
 docs/images/shot_04_hybrid.png
 eval/datasets/meridian_qa.json

@@ -319,6 +319,23 @@ record:
 
 ---
 
+## Design documents
+
+The full design record lives in [`docs/design/`](docs/design/):
+
+| Document | Answers |
+|---|---|
+| [Charter](docs/design/charter.md) | Why the project exists, scope, success criteria |
+| [Requirements](docs/design/requirements.md) | What Release 0.1 must do, prioritised with MoSCoW |
+| [Architecture Overview](docs/design/architecture-overview.md) | Layers, agents, state, retrieval, failure and security boundaries |
+| [Decision Register](docs/design/decision-register.md) | 22 architecture decisions with context and consequences |
+| [Architecture Spikes](docs/design/spikes.md) | Five experiments used to test risky assumptions, with recorded outcomes |
+
+Architecture Overview section 23 compares what was designed against what was
+built, and section 23.1 lists what remains outstanding.
+
+---
+
 ## Configuration
 
 `.env`, all optional except the provider key for your chosen model.
