@@ -32,6 +32,7 @@ data/fixtures/
 docs/*
 !docs/images/
 !docs/design/
+!docs/development.md
 # Pre-fix capture, kept locally as evidence but not shipped.
 docs/images/shot_04_hybrid.png
 eval/datasets/meridian_qa.json

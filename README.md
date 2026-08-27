@@ -397,6 +397,9 @@ Integration tests are opt-in and skip loudly when Qdrant is unreachable. That
 skip once hid a real bug: the suite silently fell back to `localhost` and
 reported clean while testing nothing. A skipped test is not a passing test.
 
+See the [developer guide](docs/development.md) for how the fakes work, how to
+add a backend, and the failure modes that are easy to miss.
+
 ---
 
 ## Licence

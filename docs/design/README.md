@@ -11,6 +11,9 @@ was structured, which decisions were taken, and which assumptions were tested.
 | [Decision Register](decision-register.md) | 22 architecture decisions with context, status and consequences |
 | [Architecture Spikes](spikes.md) | Five time-boxed experiments used to test risky assumptions before committing to them |
 
+For how to *work on* the code rather than why it is shaped this way, see the
+[developer guide](../development.md).
+
 ## How to read these
 
 Start with the **Decision Register** if you want the short version — each entry
